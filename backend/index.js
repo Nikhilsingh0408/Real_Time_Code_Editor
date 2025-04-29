@@ -3,10 +3,10 @@ import http from "http";
 import { Server } from "socket.io";
 import path from "path";
 import axios from "axios";
-import { fileURLToPath } from "url";
+//import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -213,10 +213,17 @@ io.on("connection", (socket) => {
   });
 });
 
+const __dirname = path.resolve();
+
 app.use(express.static(path.join(__dirname, "frontend", "dist")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "frontend", "dist", "index.html"));
 });
+
+// app.use(express.static(path.join(__dirname, "frontend", "dist")));
+// app.get("*", (req, res) => {
+//   res.sendFile(path.join(__dirname, "frontend", "dist", "index.html"));
+// });
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
