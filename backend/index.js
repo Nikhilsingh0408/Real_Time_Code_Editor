@@ -20,8 +20,14 @@ const io = new Server(server, {
 const rooms = new Map();
 const codeExecutionQueue = new Map();
 
-// Rate limiting for Piston API (1 request per 200ms)
-const executeCode = async (roomId, code, language, version) => {
+const DEFAULT_CODE = {
+  javascript: "// Write your JavaScript code here\nconsole.log('Hello World!');",
+  python: "# Write your Python code here\nprint('Hello World!')",
+  java: "// Write your Java code here\npublic class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello World!\");\n  }\n}",
+  cpp: "// Write your C++ code here\n#include <iostream>\n\nint main() {\n  std::cout << \"Hello World!\" << std::endl;\n  return 0;\n}"
+};
+
+const executeCode = async (roomId, code, language, version, input) => {
   try {
     if (!codeExecutionQueue.has(roomId)) {
       codeExecutionQueue.set(roomId, []);
@@ -30,33 +36,53 @@ const executeCode = async (roomId, code, language, version) => {
     return new Promise((resolve) => {
       codeExecutionQueue.get(roomId).push(async () => {
         try {
+          // For Java and C++, remove surrounding quotes from string inputs
+          let processedInput = input;
+          if ((language === 'java' || language === 'cpp') && /^".*"$/.test(input)) {
+            processedInput = input.slice(1, -1);
+          }
+
           const response = await axios.post(
             "https://emkc.org/api/v2/piston/execute",
             {
               language,
               version,
               files: [{ content: code }],
+              stdin: processedInput || "",
             },
             { timeout: 5000 }
           );
-          resolve(response.data);
+
+          // For string outputs in Java/C++, add quotes back for display
+          let output = response.data.run.output;
+          if ((language === 'java' || language === 'cpp') && 
+              !/^\d+$/.test(output.trim()) && 
+              output.trim() !== "" && 
+              !/^".*"$/.test(output.trim())) {
+            output = `"${output.trim()}"`;
+          }
+
+          resolve({
+            run: {
+              ...response.data.run,
+              output: output
+            }
+          });
         } catch (error) {
           console.error("Execution error:", error.message);
           resolve({
             run: { output: `Error: ${error.response?.data?.message || error.message}` }
           });
         } finally {
-          // Process next in queue after delay
           setTimeout(() => {
             codeExecutionQueue.get(roomId).shift();
             if (codeExecutionQueue.get(roomId).length > 0) {
               codeExecutionQueue.get(roomId)[0]();
             }
-          }, 250); // Slightly more than 200ms to be safe
+          }, 250);
         }
       });
 
-      // Start processing if this is the only item in queue
       if (codeExecutionQueue.get(roomId).length === 1) {
         codeExecutionQueue.get(roomId)[0]();
       }
@@ -76,40 +102,54 @@ io.on("connection", (socket) => {
     if (currentRoom) {
       socket.leave(currentRoom);
       if (rooms.has(currentRoom)) {
-        rooms.get(currentRoom).delete(currentUser);
-        if (rooms.get(currentRoom).size === 0) {
+        rooms.get(currentRoom).users.delete(currentUser);
+        if (rooms.get(currentRoom).users.size === 0) {
           rooms.delete(currentRoom);
         } else {
-          io.to(currentRoom).emit("userJoined", Array.from(rooms.get(currentRoom)));
+          io.to(currentRoom).emit("userJoined", Array.from(rooms.get(currentRoom).users));
         }
       }
     }
 
     currentRoom = roomId;
     currentUser = userName;
-
     socket.join(roomId);
 
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         users: new Set(),
-        code: "// start coding here...",
-        language: "javascript"
+        code: DEFAULT_CODE.javascript,
+        language: "javascript",
+        input: ""
       });
     }
 
     const room = rooms.get(roomId);
     room.users.add(userName);
 
-    io.to(roomId).emit("userJoined", Array.from(room.users));
-    socket.emit("codeUpdate", room.code);
-    socket.emit("languageUpdate", room.language);
+    // Send initial state to the new user only
+    socket.emit("initialState", {
+      code: room.code,
+      language: room.language,
+      input: room.input,
+      users: Array.from(room.users)
+    });
+
+    // Notify other users about the new user
+    socket.to(roomId).emit("userJoined", Array.from(room.users));
   });
 
   socket.on("codeChange", ({ roomId, code }) => {
     if (rooms.has(roomId)) {
       rooms.get(roomId).code = code;
       socket.to(roomId).emit("codeUpdate", code);
+    }
+  });
+
+  socket.on("inputChange", ({ roomId, input }) => {
+    if (rooms.has(roomId)) {
+      rooms.get(roomId).input = input;
+      socket.to(roomId).emit("inputUpdate", input);
     }
   });
 
@@ -120,14 +160,16 @@ io.on("connection", (socket) => {
   socket.on("languageChange", ({ roomId, language }) => {
     if (rooms.has(roomId)) {
       rooms.get(roomId).language = language;
+      rooms.get(roomId).code = DEFAULT_CODE[language] || "";
       io.to(roomId).emit("languageUpdate", language);
+      io.to(roomId).emit("codeUpdate", rooms.get(roomId).code);
     }
   });
 
-  socket.on("compileCode", async ({ code, roomId, language, version }) => {
+  socket.on("compileCode", async ({ code, roomId, language, version, input }) => {
     if (rooms.has(roomId)) {
       try {
-        const result = await executeCode(roomId, code, language, version);
+        const result = await executeCode(roomId, code, language, version, input);
         io.to(roomId).emit("codeResponse", result);
       } catch (error) {
         io.to(roomId).emit("codeResponse", {
