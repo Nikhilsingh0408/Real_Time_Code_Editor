@@ -6,7 +6,7 @@ import { FiMenu, FiX, FiCopy, FiRefreshCw, FiCode, FiTerminal, FiPlay } from "re
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-const socket = io("https://real-time-code-editor-8svb.vercel.app/", {
+const socket = io("http://localhost:5000", {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
