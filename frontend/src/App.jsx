@@ -6,7 +6,7 @@ import { FiMenu, FiX, FiCopy, FiRefreshCw, FiCode, FiTerminal, FiPlay } from "re
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-const socket = io("https://real-time-code-editor-oe3x.onrender.com", {
+const socket = io("https://real-time-code-editor-2-1h4l.onrender.com", {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
